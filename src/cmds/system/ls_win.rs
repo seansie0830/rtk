@@ -36,7 +36,7 @@ pub fn fetch_entries(paths: &[&str], show_all: bool) -> Result<Vec<LsRecord>> {
                     continue;
                 }
 
-                if !show_all && (name.starts_with('.') || NOISE_DIRS.iter().any(|noise| name == *noise)) {
+                if !show_all && NOISE_DIRS.iter().any(|noise| name == *noise) {
                     continue;
                 }
 
@@ -100,10 +100,12 @@ pub fn synthesize_output(records: Vec<LsRecord>) -> (String, String) {
             .take(5)
             .map(|(ext, count)| format!("{} {}", count, ext))
             .collect();
-        summary.push_str(&format!(" ({})", ext_parts.join(", ")));
+        summary.push_str(" (");
+        summary.push_str(&ext_parts.join(", "));
         if ext_counts.len() > 5 {
             summary.push_str(&format!(", +{} more", ext_counts.len() - 5));
         }
+        summary.push(')');
     }
     summary.push('\n');
 
