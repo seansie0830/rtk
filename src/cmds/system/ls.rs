@@ -8,11 +8,6 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use std::io::IsTerminal;
 
-#[cfg(windows)]
-use std::collections::HashMap;
-#[cfg(windows)]
-use std::path::Path;
-
 lazy_static! {
     /// Matches the date+time portion in `ls -la` output, which serves as a
     /// stable anchor regardless of owner/group column width.
@@ -42,7 +37,7 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     #[cfg(windows)]
     {
         if !tool_exists("ls") {
-            return run_native_windows(&paths, show_all, verbose);
+            return super::ls_win::run_native(&paths, show_all);
         }
     }
 
@@ -480,136 +475,4 @@ mod tests {
         assert_eq!(size, 5678);
         assert_eq!(name, "old.tar.gz");
     }
-}
-
-/// Native Windows fallback when `ls` is missing.
-/// Bypasses Unix-style parsing and uses `std::fs` directly.
-#[cfg(windows)]
-fn run_native_windows(paths: &[&str], show_all: bool, _verbose: u8) -> Result<i32> {
-    let timer = crate::core::tracking::TimedExecution::start();
-    let mut dirs = Vec::new();
-    let mut files = Vec::new();
-    let mut by_ext = HashMap::new();
-
-    let targets = if paths.is_empty() {
-        vec!["."]
-    } else {
-        paths.to_vec()
-    };
-
-    for path_str in &targets {
-        let path = Path::new(path_str);
-        if !path.exists() {
-            eprintln!("rtk: {}: No such file or directory", path_str);
-            continue;
-        }
-
-        if path.is_dir() {
-            match std::fs::read_dir(path) {
-                Ok(entries) => {
-                    for entry in entries.flatten() {
-                        let name = entry.file_name().to_string_lossy().to_string();
-
-                        // Skip . and ..
-                        if name == "." || name == ".." {
-                            continue;
-                        }
-
-                        // Filter noise dirs unless -a
-                        if !show_all && NOISE_DIRS.iter().any(|noise| name == *noise) {
-                            continue;
-                        }
-
-                        // Also filter hidden files (starting with .) on Windows if not show_all
-                        if !show_all && name.starts_with('.') {
-                            continue;
-                        }
-
-                        if let Ok(metadata) = entry.metadata() {
-                            if metadata.is_dir() {
-                                dirs.push(name);
-                            } else {
-                                let ext = if let Some(pos) = name.rfind('.') {
-                                    name[pos..].to_string()
-                                } else {
-                                    "no ext".to_string()
-                                };
-                                *by_ext.entry(ext).or_insert(0) += 1;
-                                files.push((name, human_size(metadata.len())));
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("rtk: {}: {}", path_str, e);
-                }
-            }
-        } else {
-            // Single file target
-            if let Ok(metadata) = path.metadata() {
-                let name = path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
-                files.push((name, human_size(metadata.len())));
-            }
-        }
-    }
-
-    // Sort for stable output
-    dirs.sort();
-    files.sort_by(|a, b| a.0.cmp(&b.0));
-
-    let mut entries = String::new();
-    for d in &dirs {
-        entries.push_str(d);
-        entries.push_str("/\n");
-    }
-    for (name, size) in &files {
-        entries.push_str(name);
-        entries.push_str("  ");
-        entries.push_str(size);
-        entries.push('\n');
-    }
-
-    if dirs.is_empty() && files.is_empty() {
-        entries = "(empty)\n".to_string();
-    }
-
-    // Only show summary in interactive mode
-    let is_tty = std::io::stdout().is_terminal();
-    let filtered = if is_tty {
-        let mut summary = format!("\nSummary: {} files, {} dirs", files.len(), dirs.len());
-        if !by_ext.is_empty() {
-            let mut ext_counts: Vec<_> = by_ext.iter().collect();
-            ext_counts.sort_by(|a, b| b.1.cmp(a.1));
-            let ext_parts: Vec<String> = ext_counts
-                .iter()
-                .take(5)
-                .map(|(ext, count)| format!("{} {}", count, ext))
-                .collect();
-            summary.push_str(" (");
-            summary.push_str(&ext_parts.join(", "));
-            if ext_counts.len() > 5 {
-                summary.push_str(&format!(", +{} more", ext_counts.len() - 5));
-            }
-            summary.push(')');
-        }
-        summary.push('\n');
-        format!("{}{}", entries, summary)
-    } else {
-        entries
-    };
-
-    print!("{}", filtered);
-
-    timer.track(
-        &format!("ls (native) {}", targets.join(" ")),
-        &format!("rtk ls {}", targets.join(" ")),
-        "", // No raw output for native
-        &filtered,
-    );
-
-    Ok(0)
 }
