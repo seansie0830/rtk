@@ -13,10 +13,10 @@ pub struct LsRecord {
 }
 
 /// Fetches file information from the filesystem using native Rust std::fs.
-pub fn fetch_entries(paths: &[&str], show_all: bool) -> Result<Vec<LsRecord>> {
+pub fn fetch_entries(paths: &[String], show_all: bool) -> Result<Vec<LsRecord>> {
     let mut records = Vec::new();
-    let targets = if paths.is_empty() {
-        vec!["."]
+    let targets: Vec<String> = if paths.is_empty() {
+        vec![".".to_string()]
     } else {
         paths.to_vec()
     };
@@ -113,10 +113,10 @@ pub fn synthesize_output(records: Vec<LsRecord>) -> (String, String) {
 }
 
 /// Entry point called by ls::run on Windows.
-pub fn run_native(paths: &[&str], show_all: bool) -> Result<i32> {
+pub fn run_native(paths: Vec<String>, show_all: bool) -> Result<i32> {
     let timer = crate::core::tracking::TimedExecution::start();
     
-    let records = fetch_entries(paths, show_all)?;
+    let records = fetch_entries(&paths, show_all)?;
     let (entries, summary) = synthesize_output(records);
 
     let is_tty = std::io::stdout().is_terminal();

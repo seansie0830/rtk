@@ -7,6 +7,7 @@ use anyhow::Result;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::io::IsTerminal;
+use std::process::Command;
 
 lazy_static! {
     /// Matches the date+time portion in `ls -la` output, which serves as a
@@ -17,35 +18,30 @@ lazy_static! {
     )
     .unwrap();
 }
-
-pub fn run(args: &[String], verbose: u8) -> Result<i32> {
+pub fn parser(args: &[String]) -> (Vec<String>, Vec<String>, bool) {
     let show_all = args
         .iter()
         .any(|a| (a.starts_with('-') && !a.starts_with("--") && a.contains('a')) || a == "--all");
 
-    let flags: Vec<&str> = args
+    let flags: Vec<String> = args
         .iter()
         .filter(|a| a.starts_with('-'))
-        .map(|s| s.as_str())
+        .cloned()
         .collect();
-    let paths: Vec<&str> = args
+    let paths: Vec<String> = args
         .iter()
         .filter(|a| !a.starts_with('-'))
-        .map(|s| s.as_str())
+        .cloned()
         .collect();
+    (paths, flags, show_all)
+}
 
-    #[cfg(windows)]
-    {
-        if !tool_exists("ls") {
-            return super::ls_win::run_native(&paths, show_all);
-        }
-    }
-
+pub fn cmd_builder(paths: &[String], flags: &[String], _show_all: bool) -> Command {
     let mut cmd = resolved_command("ls");
     cmd.arg("-la");
-    for flag in &flags {
+    for flag in flags {
         if flag.starts_with("--") {
-            if *flag != "--all" {
+            if flag != "--all" {
                 cmd.arg(flag);
             }
         } else {
@@ -63,10 +59,25 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     if paths.is_empty() {
         cmd.arg(".");
     } else {
-        for p in &paths {
+        for p in paths {
             cmd.arg(p);
         }
     }
+
+    cmd
+}
+
+pub fn run(args: &[String], verbose: u8) -> Result<i32> {
+    let (paths, flags, show_all) = parser(args);
+
+    #[cfg(windows)]
+    {
+        if !tool_exists("ls") {
+            return super::ls_win::run_native(paths, show_all);
+        }
+    }
+
+    let cmd = cmd_builder(&paths, &flags, show_all);
 
     let target_display = if paths.is_empty() {
         ".".to_string()
