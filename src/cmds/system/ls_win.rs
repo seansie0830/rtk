@@ -3,6 +3,7 @@ use anyhow::Result;
 use std::io::IsTerminal;
 use std::path::Path;
 use super::constants::NOISE_DIRS;
+use colored::Colorize; // 顯式引入 Trait
 
 /// Fetches file information from the filesystem using native Rust std::fs.
 pub fn fetch_entries(paths: &[String], show_all: bool) -> Result<Vec<LsRecord>> {
@@ -60,7 +61,7 @@ pub fn fetch_entries(paths: &[String], show_all: bool) -> Result<Vec<LsRecord>> 
 
 /// Entry point called by ls::run on Windows.
 pub fn run_native(paths: Vec<String>, show_all: bool) -> Result<i32> {
-    eprintln!("⚠️ Warning: ls on Windows is not fully supported yet. some flag may not work as expected. the program use system call to fetch file information.");
+    eprintln!("{}","⚠️ Warning: ls on Windows is not fully supported yet. some flag may not work as expected. the program use system call to fetch file information.".yellow().bold());
     let timer = crate::core::tracking::TimedExecution::start();
     
     let records = fetch_entries(&paths, show_all)?;
