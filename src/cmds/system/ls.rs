@@ -1,7 +1,7 @@
 //! Filters directory listings into a compact tree format.
 
 use super::constants::NOISE_DIRS;
-pub use super::ls_format::{human_size, synthesize_output, LsRecord};
+pub use super::ls_format::{synthesize_output, LsRecord};
 pub use super::ls_unix::parse_ls_line;
 use crate::core::runner::{self, RunOptions};
 use crate::core::utils::{resolved_command, tool_exists};
@@ -157,6 +157,7 @@ pub fn compact_ls(raw: &str, show_all: bool) -> Vec<LsRecord> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cmds::system::ls_format::human_size;
 
     #[test]
     fn test_compact_basic() {
@@ -336,18 +337,13 @@ mod tests {
             entries.contains("archive.tar"),
             "should contain filename, got: {entries}"
         );
-        assert!(
-            entries.contains("5.5K"),
-            "should show 5.5K, got: {entries}"
-        );
+        assert!(entries.contains("5.5K"), "should show 5.5K, got: {entries}");
     }
 
     #[test]
     fn test_parse_ls_line_basic() {
-        let (ft, size, name) = parse_ls_line(
-            "-rw-r--r--  1 user staff 1234 Jan  1 12:00 file.txt",
-        )
-        .unwrap();
+        let (ft, size, name) =
+            parse_ls_line("-rw-r--r--  1 user staff 1234 Jan  1 12:00 file.txt").unwrap();
         assert_eq!(ft, '-');
         assert_eq!(size, 1234);
         assert_eq!(name, "file.txt");
@@ -355,10 +351,9 @@ mod tests {
 
     #[test]
     fn test_parse_ls_line_multiline_group() {
-        let (ft, size, name) = parse_ls_line(
-            "-rw-r--r--  1 fjeanne utilisa. du domaine 0 Mar 31 16:18 empty.txt",
-        )
-        .unwrap();
+        let (ft, size, name) =
+            parse_ls_line("-rw-r--r--  1 fjeanne utilisa. du domaine 0 Mar 31 16:18 empty.txt")
+                .unwrap();
         assert_eq!(ft, '-');
         assert_eq!(size, 0);
         assert_eq!(name, "empty.txt");
@@ -366,10 +361,9 @@ mod tests {
 
     #[test]
     fn test_parse_ls_line_dir_with_space_in_group() {
-        let (ft, size, name) = parse_ls_line(
-            "drwxr-xr-x  2 fjeanne utilisa. du domaine 64 Mar 31 16:18 my dir",
-        )
-        .unwrap();
+        let (ft, size, name) =
+            parse_ls_line("drwxr-xr-x  2 fjeanne utilisa. du domaine 64 Mar 31 16:18 my dir")
+                .unwrap();
         assert_eq!(ft, 'd');
         assert_eq!(size, 64);
         assert_eq!(name, "my dir");
@@ -377,10 +371,8 @@ mod tests {
 
     #[test]
     fn test_parse_ls_line_symlink() {
-        let (ft, size, name) = parse_ls_line(
-            "lrwxr-xr-x  1 user staff 10 Jan  1 12:00 link -> target",
-        )
-        .unwrap();
+        let (ft, size, name) =
+            parse_ls_line("lrwxr-xr-x  1 user staff 10 Jan  1 12:00 link -> target").unwrap();
         assert_eq!(ft, 'l');
         assert_eq!(size, 10);
         assert_eq!(name, "link -> target");
@@ -393,10 +385,8 @@ mod tests {
 
     #[test]
     fn test_parse_ls_line_year_format() {
-        let (ft, size, name) = parse_ls_line(
-            "-rw-r--r--  1 user staff 5678 Dec 25  2024 old.tar.gz",
-        )
-        .unwrap();
+        let (ft, size, name) =
+            parse_ls_line("-rw-r--r--  1 user staff 5678 Dec 25  2024 old.tar.gz").unwrap();
         assert_eq!(ft, '-');
         assert_eq!(size, 5678);
         assert_eq!(name, "old.tar.gz");
