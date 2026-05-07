@@ -6,7 +6,7 @@ pub struct LsRecord {
     pub is_dir: bool,
     pub size: u64,
     pub extension: String,
-    pub timestamp : Option(u64)
+    pub timestamp: Option<u64>,
 }
 
 /// Format bytes into human-readable size

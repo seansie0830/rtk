@@ -85,8 +85,8 @@ pub fn run_native( paths: Vec<String>, show_all: bool ,  flags:Vec<String>) -> R
         files.reverse();
     }
     if flags.contains(&"-t".to_string()) {
-        dirs.sort_by(|a, b| b.size.cmp(&a.size));
-        files.sort_by(|a, b| b.size.cmp(&a.size));
+        dirs.sort_by(|a, b| b.timestamp.unwrap_or(0).cmp(&a.timestamp.unwrap_or(0)));      
+        files.sort_by(|a, b| b.timestamp.unwrap_or(0).cmp(&a.timestamp.unwrap_or(0)));
     }
     if !flags.is_empty() && flags.iter().all(|f| f != "-t" && f != "-r"){
         eprintln!("{}","rtk ls: native Windows path ignores flags: {flags:?}".bold().yellow())
