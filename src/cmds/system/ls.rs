@@ -148,6 +148,7 @@ pub fn compact_ls(raw: &str, show_all: bool) -> (Vec<LsRecord>, Vec<LsRecord>) {
             is_dir: file_type == 'd',
             size,
             name,
+            timestamp:None
         });
     }
 
