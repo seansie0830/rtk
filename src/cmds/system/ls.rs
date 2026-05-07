@@ -1,23 +1,14 @@
 //! Filters directory listings into a compact tree format.
 
 use super::constants::NOISE_DIRS;
+pub use super::ls_format::{human_size, synthesize_output, LsRecord};
+pub use super::ls_unix::parse_ls_line;
 use crate::core::runner::{self, RunOptions};
 use crate::core::utils::{resolved_command, tool_exists};
 use anyhow::Result;
-use lazy_static::lazy_static;
-use regex::Regex;
 use std::io::IsTerminal;
 use std::process::Command;
 
-lazy_static! {
-    /// Matches the date+time portion in `ls -la` output, which serves as a
-    /// stable anchor regardless of owner/group column width.
-    /// E.g.: " Mar 31 16:18 " or " Dec 25  2024 "
-    static ref LS_DATE_RE: Regex = Regex::new(
-        r"\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+(?:\d{4}|\d{2}:\d{2})\s+"
-    )
-    .unwrap();
-}
 pub fn parser(args: &[String]) -> (Vec<String>, Vec<String>, bool) {
     let show_all = args
         .iter()
@@ -90,7 +81,8 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
         "ls",
         &format!("-la {}", target_display),
         |raw| {
-            let (entries, summary) = compact_ls(raw, show_all);
+            let records = compact_ls(raw, show_all);
+            let (entries, summary) = synthesize_output(records);
 
             // Only show summary in interactive mode (not when piped)
             let is_tty = std::io::stdout().is_terminal();
@@ -120,61 +112,17 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     )
 }
 
-/// Format bytes into human-readable size
-fn human_size(bytes: u64) -> String {
-    if bytes >= 1_048_576 {
-        format!("{:.1}M", bytes as f64 / 1_048_576.0)
-    } else if bytes >= 1024 {
-        format!("{:.1}K", bytes as f64 / 1024.0)
+pub fn get_extension(name: &str) -> String {
+    if let Some(pos) = name.rfind('.') {
+        name[pos..].to_string()
     } else {
-        format!("{}B", bytes)
+        "no ext".to_string()
     }
 }
 
-/// Parse a single `ls -la` line, returning `(file_type_char, size, name)`.
-///
-/// Uses the date field as a stable anchor — the date format in `ls -la` is
-/// always three tokens (`Mon DD HH:MM` or `Mon DD  YYYY`), so we locate it
-/// with a regex, then extract size (rightmost number before the date) and
-/// filename (everything after the date). This handles owner/group names that
-/// contain spaces, which break the old fixed-column approach.
-fn parse_ls_line(line: &str) -> Option<(char, u64, String)> {
-    let date_match = LS_DATE_RE.find(line)?;
-    let name = line[date_match.end()..].to_string();
-
-    let before_date = &line[..date_match.start()];
-    let before_parts: Vec<&str> = before_date.split_whitespace().collect();
-    if before_parts.len() < 4 {
-        return None;
-    }
-
-    let perms = before_parts[0];
-    let file_type = perms.chars().next()?;
-
-    // Size is the rightmost parseable number before the date.
-    // nlinks is also numeric but appears earlier; scanning from the end
-    // guarantees we hit the size field first.
-    let mut size: u64 = 0;
-    for part in before_parts.iter().rev() {
-        if let Ok(s) = part.parse::<u64>() {
-            size = s;
-            break;
-        }
-    }
-
-    Some((file_type, size, name))
-}
-
-/// Parse ls -la output into compact format:
-///   name/  (dirs)
-///   name  size  (files)
-/// Returns (entries, summary) so caller can suppress summary when piped.
-fn compact_ls(raw: &str, show_all: bool) -> (String, String) {
-    use std::collections::HashMap;
-
-    let mut dirs: Vec<String> = Vec::new();
-    let mut files: Vec<(String, String)> = Vec::new(); // (name, size)
-    let mut by_ext: HashMap<String, usize> = HashMap::new();
+/// Parse ls -la output into compact records.
+pub fn compact_ls(raw: &str, show_all: bool) -> Vec<LsRecord> {
+    let mut records = Vec::new();
 
     for line in raw.lines() {
         if line.starts_with("total ") || line.is_empty() {
@@ -195,59 +143,15 @@ fn compact_ls(raw: &str, show_all: bool) -> (String, String) {
             continue;
         }
 
-        if file_type == 'd' {
-            dirs.push(name);
-        } else if file_type == '-' || file_type == 'l' {
-            let ext = if let Some(pos) = name.rfind('.') {
-                name[pos..].to_string()
-            } else {
-                "no ext".to_string()
-            };
-            *by_ext.entry(ext).or_insert(0) += 1;
-            files.push((name, human_size(size)));
-        }
+        records.push(LsRecord {
+            extension: get_extension(&name),
+            is_dir: file_type == 'd',
+            size,
+            name,
+        });
     }
 
-    if dirs.is_empty() && files.is_empty() {
-        return ("(empty)\n".to_string(), String::new());
-    }
-
-    let mut entries = String::new();
-
-    // Dirs first, compact
-    for d in &dirs {
-        entries.push_str(d);
-        entries.push_str("/\n");
-    }
-
-    // Files with size
-    for (name, size) in &files {
-        entries.push_str(name);
-        entries.push_str("  ");
-        entries.push_str(size);
-        entries.push('\n');
-    }
-
-    // Summary line (separate so caller can suppress when piped)
-    let mut summary = format!("\nSummary: {} files, {} dirs", files.len(), dirs.len());
-    if !by_ext.is_empty() {
-        let mut ext_counts: Vec<_> = by_ext.iter().collect();
-        ext_counts.sort_by(|a, b| b.1.cmp(a.1));
-        let ext_parts: Vec<String> = ext_counts
-            .iter()
-            .take(5)
-            .map(|(ext, count)| format!("{} {}", count, ext))
-            .collect();
-        summary.push_str(" (");
-        summary.push_str(&ext_parts.join(", "));
-        if ext_counts.len() > 5 {
-            summary.push_str(&format!(", +{} more", ext_counts.len() - 5));
-        }
-        summary.push(')');
-    }
-    summary.push('\n');
-
-    (entries, summary)
+    records
 }
 
 #[cfg(test)]
@@ -262,7 +166,8 @@ mod tests {
                      drwxr-xr-x  2 user  staff    64 Jan  1 12:00 src\n\
                      -rw-r--r--  1 user  staff  1234 Jan  1 12:00 Cargo.toml\n\
                      -rw-r--r--  1 user  staff  5678 Jan  1 12:00 README.md\n";
-        let (entries, _summary) = compact_ls(input, false);
+        let records = compact_ls(input, false);
+        let (entries, _summary) = synthesize_output(records);
         assert!(entries.contains("src/"));
         assert!(entries.contains("Cargo.toml"));
         assert!(entries.contains("README.md"));
@@ -283,7 +188,8 @@ mod tests {
                      drwxr-xr-x  2 user  staff  64 Jan  1 12:00 target\n\
                      drwxr-xr-x  2 user  staff  64 Jan  1 12:00 src\n\
                      -rw-r--r--  1 user  staff  100 Jan  1 12:00 main.rs\n";
-        let (entries, _summary) = compact_ls(input, false);
+        let records = compact_ls(input, false);
+        let (entries, _summary) = synthesize_output(records);
         assert!(!entries.contains("node_modules"));
         assert!(!entries.contains(".git"));
         assert!(!entries.contains("target"));
@@ -296,7 +202,8 @@ mod tests {
         let input = "total 8\n\
                      drwxr-xr-x  2 user  staff  64 Jan  1 12:00 .git\n\
                      drwxr-xr-x  2 user  staff  64 Jan  1 12:00 src\n";
-        let (entries, _summary) = compact_ls(input, true);
+        let records = compact_ls(input, true);
+        let (entries, _summary) = synthesize_output(records);
         assert!(entries.contains(".git/"));
         assert!(entries.contains("src/"));
     }
@@ -304,7 +211,8 @@ mod tests {
     #[test]
     fn test_compact_empty() {
         let input = "total 0\n";
-        let (entries, summary) = compact_ls(input, false);
+        let records = compact_ls(input, false);
+        let (entries, summary) = synthesize_output(records);
         assert_eq!(entries, "(empty)\n");
         assert!(summary.is_empty());
     }
@@ -316,7 +224,8 @@ mod tests {
                      -rw-r--r--  1 user  staff  1234 Jan  1 12:00 main.rs\n\
                      -rw-r--r--  1 user  staff  5678 Jan  1 12:00 lib.rs\n\
                      -rw-r--r--  1 user  staff   100 Jan  1 12:00 Cargo.toml\n";
-        let (_entries, summary) = compact_ls(input, false);
+        let records = compact_ls(input, false);
+        let (_entries, summary) = synthesize_output(records);
         assert!(summary.contains("Summary: 3 files, 1 dirs"));
         assert!(summary.contains(".rs"));
         assert!(summary.contains(".toml"));
@@ -336,7 +245,8 @@ mod tests {
     fn test_compact_handles_filenames_with_spaces() {
         let input = "total 8\n\
                      -rw-r--r--  1 user  staff  1234 Jan  1 12:00 my file.txt\n";
-        let (entries, _summary) = compact_ls(input, false);
+        let records = compact_ls(input, false);
+        let (entries, _summary) = synthesize_output(records);
         assert!(entries.contains("my file.txt"));
     }
 
@@ -344,7 +254,8 @@ mod tests {
     fn test_compact_symlinks() {
         let input = "total 8\n\
                      lrwxr-xr-x  1 user  staff  10 Jan  1 12:00 link -> target\n";
-        let (entries, _summary) = compact_ls(input, false);
+        let records = compact_ls(input, false);
+        let (entries, _summary) = synthesize_output(records);
         assert!(entries.contains("link -> target"));
     }
 
@@ -354,7 +265,8 @@ mod tests {
         let input = "total 48\n\
                      drwxr-xr-x  2 user  staff    64 Jan  1 12:00 src\n\
                      -rw-r--r--  1 user  staff  1234 Jan  1 12:00 main.rs\n";
-        let (entries, summary) = compact_ls(input, false);
+        let records = compact_ls(input, false);
+        let (entries, summary) = synthesize_output(records);
         assert!(
             !entries.contains("Summary:"),
             "entries must not contain summary"
@@ -373,7 +285,8 @@ mod tests {
                      drwxr-xr-x  2 user  staff    64 Jan  1 12:00 src\n\
                      -rw-r--r--  1 user  staff  1234 Jan  1 12:00 main.rs\n\
                      -rw-r--r--  1 user  staff  5678 Jan  1 12:00 lib.rs\n";
-        let (entries, _summary) = compact_ls(input, false);
+        let records = compact_ls(input, false);
+        let (entries, _summary) = synthesize_output(records);
         let line_count = entries.lines().count();
         assert_eq!(
             line_count, 3,
@@ -388,7 +301,8 @@ mod tests {
         let input = "total 8\n\
                      -rw-r--r--  1 fjeanne utilisa. du domaine    0 Mar 31 16:18 empty.txt\n\
                      -rw-r--r--  1 fjeanne utilisa. du domaine 1234 Mar 31 16:18 data.json\n";
-        let (entries, _summary) = compact_ls(input, false);
+        let records = compact_ls(input, false);
+        let (entries, _summary) = synthesize_output(records);
         assert!(
             entries.contains("empty.txt"),
             "should contain 'empty.txt', got: {entries}"
@@ -416,7 +330,8 @@ mod tests {
         // Some systems show year instead of time for old files
         let input = "total 8\n\
                      -rw-r--r--  1 user staff  5678 Dec 25  2024 archive.tar\n";
-        let (entries, _summary) = compact_ls(input, false);
+        let records = compact_ls(input, false);
+        let (entries, _summary) = synthesize_output(records);
         assert!(
             entries.contains("archive.tar"),
             "should contain filename, got: {entries}"
