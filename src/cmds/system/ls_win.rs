@@ -77,7 +77,6 @@ pub fn fetch_entries(paths: &[String], show_all: bool) -> Result<(Vec<LsRecord>,
 
 /// Entry point called by ls::run on Windows.
 pub fn run_native( paths: Vec<String>, show_all: bool ,  flags:Vec<String>) -> Result<i32> {
-    eprintln!("{}","⚠️ Warning: ls on Windows is not fully supported yet. some flag may not work as expected. the program use system call to fetch file information.".yellow().bold());
     let timer = crate::core::tracking::TimedExecution::start();
     
     let (mut dirs, mut files) = fetch_entries(&paths, show_all)?;
@@ -88,6 +87,9 @@ pub fn run_native( paths: Vec<String>, show_all: bool ,  flags:Vec<String>) -> R
     if flags.contains(&"-t".to_string()) {
         dirs.sort_by(|a, b| b.size.cmp(&a.size));
         files.sort_by(|a, b| b.size.cmp(&a.size));
+    }
+    if !flags.is_empty() && flags.iter().all(|f| f != "-t" && f != "-r"){
+        eprintln!("{}","rtk ls: native Windows path ignores flags: {flags:?}".bold().yellow())
     }
     let (entries, summary) = ls::synthesize_output(dirs,files);
 
