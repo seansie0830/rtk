@@ -21,7 +21,8 @@ pub fn human_size(bytes: u64) -> String {
 }
 
 /// Synthesizes the compact, token-optimized string from a list of records.
-pub fn synthesize_output(mut dirs: Vec<LsRecord>, mut files: Vec<LsRecord>) -> (String, String) {
+pub fn synthesize_output(dir_and_files: (Vec<LsRecord>, Vec<LsRecord>)) -> (String, String) {
+    let (mut dirs, mut files) = dir_and_files;
     if dirs.is_empty() && files.is_empty() {
         return ("(empty)\n".to_string(), String::new());
     }
@@ -33,8 +34,10 @@ pub fn synthesize_output(mut dirs: Vec<LsRecord>, mut files: Vec<LsRecord>) -> (
     }
 
     // Sort to ensure stable output order
-    dirs.sort_by(|a, b| a.name.cmp(&b.name));
-    files.sort_by(|a, b| a.name.cmp(&b.name));
+    #[cfg(not(target_os = "windows"))]{
+        dirs.sort_by(|a, b| a.name.cmp(&b.name));
+        files.sort_by(|a, b| a.name.cmp(&b.name));  
+    }
 
     let mut entries = String::new();
     for d in &dirs {

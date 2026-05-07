@@ -81,8 +81,8 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
         "ls",
         &format!("-la {}", target_display),
         |raw| {
-            let (dirs, files) = compact_ls(raw, show_all);
-            let (entries, summary) = synthesize_output(dirs, files);
+            let result = compact_ls(raw, show_all);
+            let (entries, summary) = synthesize_output(result);
 
             // Only show summary in interactive mode (not when piped)
             let is_tty = std::io::stdout().is_terminal();
