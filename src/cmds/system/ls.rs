@@ -64,7 +64,7 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     #[cfg(windows)]
     {
         if !tool_exists("ls") {
-            return super::ls_win::run_native(paths, show_all);
+            return super::ls_win::run_native(paths, show_all,flags);
         }
     }
 
@@ -81,8 +81,8 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
         "ls",
         &format!("-la {}", target_display),
         |raw| {
-            let records = compact_ls(raw, show_all);
-            let (entries, summary) = synthesize_output(records);
+            let (dirs, files) = compact_ls(raw, show_all);
+            let (entries, summary) = synthesize_output(dirs, files);
 
             // Only show summary in interactive mode (not when piped)
             let is_tty = std::io::stdout().is_terminal();
@@ -121,7 +121,7 @@ pub fn get_extension(name: &str) -> String {
 }
 
 /// Parse ls -la output into compact records.
-pub fn compact_ls(raw: &str, show_all: bool) -> Vec<LsRecord> {
+pub fn compact_ls(raw: &str, show_all: bool) -> (Vec<LsRecord>, Vec<LsRecord>) {
     let mut records = Vec::new();
 
     for line in raw.lines() {
@@ -151,7 +151,10 @@ pub fn compact_ls(raw: &str, show_all: bool) -> Vec<LsRecord> {
         });
     }
 
-    records
+    let (dirs, files): (Vec<LsRecord>, Vec<LsRecord>) = records
+        .into_iter() 
+        .partition(|r| r.is_dir);
+    (dirs, files)
 }
 
 #[cfg(test)]

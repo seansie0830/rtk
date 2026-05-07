@@ -6,6 +6,7 @@ pub struct LsRecord {
     pub is_dir: bool,
     pub size: u64,
     pub extension: String,
+    pub timestamp : u64
 }
 
 /// Format bytes into human-readable size
@@ -20,13 +21,11 @@ pub fn human_size(bytes: u64) -> String {
 }
 
 /// Synthesizes the compact, token-optimized string from a list of records.
-pub fn synthesize_output(records: Vec<LsRecord>) -> (String, String) {
-    if records.is_empty() {
+pub fn synthesize_output(mut dirs: Vec<LsRecord>, mut files: Vec<LsRecord>) -> (String, String) {
+    if dirs.is_empty() && files.is_empty() {
         return ("(empty)\n".to_string(), String::new());
     }
 
-    let mut dirs: Vec<&LsRecord> = records.iter().filter(|r| r.is_dir).collect();
-    let mut files: Vec<&LsRecord> = records.iter().filter(|r| !r.is_dir).collect();
     let mut by_ext = HashMap::new();
 
     for file in &files {
