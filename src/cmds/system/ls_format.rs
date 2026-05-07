@@ -49,7 +49,7 @@ pub fn synthesize_output(records: Vec<LsRecord>) -> (String, String) {
     let mut summary = format!("\nSummary: {} files, {} dirs", files.len(), dirs.len());
     if !by_ext.is_empty() {
         let mut ext_counts: Vec<_> = by_ext.iter().collect();
-        ext_counts.sort_by(|a, b| b.1.cmp(a.1));
+        ext_counts.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
         let ext_parts: Vec<String> = ext_counts
             .iter()
             .take(5)
