@@ -4,6 +4,7 @@ use std::io::IsTerminal;
 use std::path::Path;
 use super::constants::NOISE_DIRS;
 use colored::Colorize; // 顯式引入 Trait
+use std::time::UNIX_EPOCH;
 
 /// Fetches file information from the filesystem using native Rust std::fs.
 pub fn fetch_entries(paths: &[String], show_all: bool) -> Result<(Vec<LsRecord>, Vec<LsRecord>)> {
@@ -37,14 +38,14 @@ pub fn fetch_entries(paths: &[String], show_all: bool) -> Result<(Vec<LsRecord>,
                     let timestamp = metadata.modified()
                                             .ok()
                                             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                                            .map(|d| d.as_secs() as i64)
+                                            .map(|d| d.as_secs() as u64)
                                             .unwrap_or(0);
                     records.push(LsRecord {
                         extension: ls::get_extension(&name),
                         is_dir: metadata.is_dir(),
                         size: metadata.len(),
                         name,
-                        
+                        timestamp
                     });
                 }
             }
@@ -54,11 +55,17 @@ pub fn fetch_entries(paths: &[String], show_all: bool) -> Result<(Vec<LsRecord>,
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
+            let timestamp = metadata.modified()
+                                    .ok()
+                                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                                    .map(|d| d.as_secs() as u64)
+                                    .unwrap_or(0);
             records.push(LsRecord {
                 extension: ls::get_extension(&name),
                 is_dir: false,
                 size: metadata.len(),
                 name,
+                timestamp
             });
         }
     }
