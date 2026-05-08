@@ -1,9 +1,16 @@
 use std::collections::HashMap;
 
 /// Represents a single directory entry for token-optimized listing.
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+pub enum LsRecordType{
+    FILE,
+    DIRECTORY,
+    SYMBOLINK,
+    UNKNOWN,
+}
 pub struct LsRecord {
     pub name: String,
-    pub is_dir: bool,
+    pub file_type: LsRecordType,
     pub size: u64,
     pub extension: String,
     pub timestamp: Option<u64>,
@@ -21,34 +28,58 @@ pub fn human_size(bytes: u64) -> String {
 }
 
 /// Synthesizes the compact, token-optimized string from a list of records.
-pub fn synthesize_output(dir_and_files: (Vec<LsRecord>, Vec<LsRecord>)) -> (String, String) {
-    let (mut dirs, mut files) = dir_and_files;
-    if dirs.is_empty() && files.is_empty() {
+pub fn synthesize_output(mut records: Vec<LsRecord>) -> (String, String) {
+    if records.is_empty() {
         return ("(empty)\n".to_string(), String::new());
     }
 
     let mut by_ext = HashMap::new();
 
-    for file in &files {
-        *by_ext.entry(file.extension.clone()).or_insert(0) += 1;
-    }
-
     // Sort to ensure stable output order
     #[cfg(not(target_os = "windows"))]{
-        dirs.sort_by(|a, b| a.name.cmp(&b.name));
-        files.sort_by(|a, b| a.name.cmp(&b.name));  
+        records.sort_by(|a, b| a.name.cmp(&b.name));
+    }
+
+    let mut dirs_out = String::new();
+    let mut files_out = String::new();
+    let mut symlinks_out = String::new();
+
+    let mut dir_count = 0;
+    let mut file_count = 0;
+    let mut sym_count = 0;
+
+    for r in &records {
+        match r.file_type {
+            LsRecordType::DIRECTORY => {
+                dirs_out.push_str(&format!("{}/\n", r.name));
+                dir_count += 1;
+            }
+            LsRecordType::SYMBOLINK => {
+                symlinks_out.push_str(&format!("{}  {}\n", r.name, human_size(r.size)));
+                sym_count += 1;
+            }
+            _ => {
+                if r.file_type == LsRecordType::FILE {
+                    *by_ext.entry(r.extension.clone()).or_insert(0) += 1;
+                }
+                files_out.push_str(&format!("{}  {}\n", r.name, human_size(r.size)));
+                file_count += 1;
+            }
+        }
     }
 
     let mut entries = String::new();
-    for d in &dirs {
-        entries.push_str(&format!("{}/\n", d.name));
-    }
-    for f in &files {
-        entries.push_str(&format!("{}  {}\n", f.name, human_size(f.size)));
-    }
+    entries.push_str(&dirs_out);
+    entries.push_str(&symlinks_out);
+    entries.push_str(&files_out);
 
     // Summary line (separate so caller can suppress when piped)
-    let mut summary = format!("\nSummary: {} files, {} dirs", files.len(), dirs.len());
+    let mut summary = if sym_count > 0 {
+        format!("\nSummary: {} files, {} dirs, {} symlinks", file_count, dir_count, sym_count)
+    } else {
+        format!("\nSummary: {} files, {} dirs", file_count, dir_count)
+    };
+
     if !by_ext.is_empty() {
         let mut ext_counts: Vec<_> = by_ext.iter().collect();
         ext_counts.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));

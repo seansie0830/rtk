@@ -1,7 +1,7 @@
 //! Filters directory listings into a compact tree format.
 
 use super::constants::NOISE_DIRS;
-pub use super::ls_format::{synthesize_output, LsRecord};
+pub use super::ls_format::{synthesize_output, LsRecord, LsRecordType};
 pub use super::ls_unix::parse_ls_line;
 use crate::core::runner::{self, RunOptions};
 use crate::core::utils::{resolved_command, tool_exists};
@@ -64,7 +64,21 @@ pub fn run(args: &[String], verbose: u8) -> Result<i32> {
     #[cfg(windows)]
     {
         if !tool_exists("ls") {
-            return super::ls_win::run_native(paths, show_all,flags);
+            let timer = crate::core::tracking::TimedExecution::start();
+
+            let (exit_code, output) = super::ls_win::run_native(paths.clone(), show_all, flags.clone())?;
+            print!("{}", output);
+
+            let raw_estimate = estimate_raw_dir_output();
+
+            timer.track(
+                "dir /s",
+                "rtk ls (native win)",
+                &raw_estimate,
+                &output,
+            );
+
+            return Ok(exit_code);
         }
     }
 
@@ -120,8 +134,14 @@ pub fn get_extension(name: &str) -> String {
     }
 }
 
+#[cfg(windows)]
+fn estimate_raw_dir_output() -> String {
+    // Provide a dummy implementation to satisfy tracking
+    String::new()
+}
+
 /// Parse ls -la output into compact records.
-pub fn compact_ls(raw: &str, show_all: bool) -> (Vec<LsRecord>, Vec<LsRecord>) {
+pub fn compact_ls(raw: &str, show_all: bool) -> Vec<LsRecord> {
     let mut records = Vec::new();
 
     for line in raw.lines() {
@@ -129,7 +149,7 @@ pub fn compact_ls(raw: &str, show_all: bool) -> (Vec<LsRecord>, Vec<LsRecord>) {
             continue;
         }
 
-        let Some((file_type, size, name)) = parse_ls_line(line) else {
+        let Some((file_type_ch, size, name)) = parse_ls_line(line) else {
             continue;
         };
 
@@ -142,20 +162,22 @@ pub fn compact_ls(raw: &str, show_all: bool) -> (Vec<LsRecord>, Vec<LsRecord>) {
         if !show_all && NOISE_DIRS.iter().any(|noise| name == *noise) {
             continue;
         }
-
+        let file_type = match file_type_ch {
+            'd' => LsRecordType::DIRECTORY,
+            'l' => LsRecordType::SYMBOLINK,
+            'f' | '-' => LsRecordType::FILE,
+            _ => LsRecordType::UNKNOWN,
+        };
         records.push(LsRecord {
             extension: get_extension(&name),
-            is_dir: file_type == 'd',
+            file_type,
             size,
             name,
-            timestamp:None
+            timestamp: None,
         });
     }
 
-    let (dirs, files): (Vec<LsRecord>, Vec<LsRecord>) = records
-        .into_iter() 
-        .partition(|r| r.is_dir);
-    (dirs, files)
+    records
 }
 
 #[cfg(test)]

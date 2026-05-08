@@ -1,14 +1,18 @@
+use crate::cmds::system::ls_format::LsRecordType;
 use super::constants::NOISE_DIRS;
 use super::ls::{self, LsRecord};
+
 use anyhow::Result;
-use colored::Colorize; // 顯式引入 Trait
+use colored::Colorize; 
 use std::collections::HashSet;
 use std::io::IsTerminal;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
+
 /// Fetches file information from the filesystem using native Rust std::fs.
-pub fn fetch_entries(paths: &[String], show_all: bool) -> Result<(Vec<LsRecord>, Vec<LsRecord>)> {
+/// refactor required
+pub fn fetch_entries(paths: &[String], show_all: bool) -> Result<Vec<LsRecord>> {
     let mut records = Vec::new();
     let targets: Vec<String> = if paths.is_empty() {
         vec![".".to_string()]
@@ -23,8 +27,17 @@ pub fn fetch_entries(paths: &[String], show_all: bool) -> Result<(Vec<LsRecord>,
             continue;
         }
 
-        if path.is_dir() {
-            for entry in std::fs::read_dir(path)?.flatten() {
+        let metadata = match std::fs::symlink_metadata(path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        if metadata.is_dir() {
+            for entry_res in std::fs::read_dir(path)? {
+                let entry = match entry_res {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
                 let name = entry.file_name().to_string_lossy().to_string();
 
                 if name == "." || name == ".." {
@@ -35,30 +48,49 @@ pub fn fetch_entries(paths: &[String], show_all: bool) -> Result<(Vec<LsRecord>,
                     continue;
                 }
 
-                if let Ok(metadata) = entry.metadata() {
-                    let timestamp = Some(
-                        metadata
-                            .modified()
+                if let Ok(file_type) = entry.file_type() {
+                    let ls_file_type = if file_type.is_symlink() {
+                        LsRecordType::SYMBOLINK
+                    } else if file_type.is_dir() {
+                        LsRecordType::DIRECTORY
+                    } else {
+                        LsRecordType::FILE
+                    };
+
+                    let meta = entry.metadata().or_else(|_| std::fs::symlink_metadata(entry.path())).ok();
+                    let (size, timestamp) = if let Some(m) = meta {
+                        let ts = m.modified()
                             .ok()
                             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                             .map(|d| d.as_secs() as u64)
-                            .unwrap_or(0),
-                    );
+                            .unwrap_or(0);
+                        (m.len(), Some(ts))
+                    } else {
+                        (0, None)
+                    };
+
                     records.push(LsRecord {
                         extension: ls::get_extension(&name),
-                        is_dir: metadata.is_dir(),
-                        size: metadata.len(),
+                        file_type: ls_file_type,
+                        size,
                         name,
                         timestamp,
                     });
                 }
             }
-        } else if let Ok(metadata) = path.metadata() {
+        } else {
             let name = path
                 .file_name()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
+                
+            let ls_file_type = if metadata.is_symlink() {
+                LsRecordType::SYMBOLINK
+            } else {
+                LsRecordType::FILE
+            };
+
             let timestamp = Some(
                 metadata
                     .modified()
@@ -69,15 +101,14 @@ pub fn fetch_entries(paths: &[String], show_all: bool) -> Result<(Vec<LsRecord>,
             );
             records.push(LsRecord {
                 extension: ls::get_extension(&name),
-                is_dir: false,
+                file_type: ls_file_type,
                 size: metadata.len(),
                 name,
                 timestamp,
             });
         }
     }
-    let (dirs, files): (Vec<LsRecord>, Vec<LsRecord>) = records.into_iter().partition(|r| r.is_dir);
-    Ok((dirs, files))
+    Ok(records)
 }
 fn warn_unsupported_flags(flags: &[String]) {
     let allowed_flags = ["-t", "-r", "-rt", "-tr"];
@@ -100,9 +131,8 @@ fn warn_unsupported_flags(flags: &[String]) {
     }
 }
 
-pub fn run_native(paths: Vec<String>, show_all: bool, flags: Vec<String>) -> Result<i32> {
+pub fn run_native(paths: Vec<String>, show_all: bool, flags: Vec<String>) -> Result<(i32, String)> {
     warn_unsupported_flags(&flags);
-    let timer = crate::core::tracking::TimedExecution::start();
 
     let active_flags: HashSet<char> = flags
         .iter()
@@ -113,26 +143,24 @@ pub fn run_native(paths: Vec<String>, show_all: bool, flags: Vec<String>) -> Res
     let is_r = active_flags.contains(&'r');
     let is_t = active_flags.contains(&'t');
 
-    let (mut dirs, mut files) = fetch_entries(&paths, show_all)?;
+    let mut records = fetch_entries(&paths, show_all)?;
 
     let sort_fn = if is_t {
-        // 按時間倒序 (新到舊)
+        //
         |a: &LsRecord, b: &LsRecord| b.timestamp.unwrap_or(0).cmp(&a.timestamp.unwrap_or(0))
     } else {
-        // 按名稱正序
+        //
         |a: &LsRecord, b: &LsRecord| a.name.cmp(&b.name)
     };
 
-    dirs.sort_by(sort_fn);
-    files.sort_by(sort_fn);
+    records.sort_by(sort_fn);
 
-    // 3. 反轉邏輯
+    // 
     if is_r {
-        dirs.reverse();
-        files.reverse();
+        records.reverse();
     }
 
-    let (entries, summary) = ls::synthesize_output((dirs, files));
+    let (entries, summary) = ls::synthesize_output(records);
     let is_tty = std::io::stdout().is_terminal();
     let output = if is_tty {
         format!("{}{}", entries, summary)
@@ -140,14 +168,5 @@ pub fn run_native(paths: Vec<String>, show_all: bool, flags: Vec<String>) -> Res
         entries
     };
 
-    print!("{}", output);
-
-    timer.track(
-        &format!("ls (native) {}", paths.join(" ")),
-        &format!("rtk ls {}", paths.join(" ")),
-        "",
-        &output,
-    );
-
-    Ok(0)
+    Ok((0, output))
 }
