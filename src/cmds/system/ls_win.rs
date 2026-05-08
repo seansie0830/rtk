@@ -45,7 +45,7 @@ pub fn fetch_entries(paths: &[String], show_all: bool) -> Result<Vec<LsRecord>> 
                     Ok(e) => e,
                     Err(_) => continue,
                 };
-                let name = entry.file_name().to_string_lossy().to_string();
+                let mut name = entry.file_name().to_string_lossy().to_string();
 
                 if name == "." || name == ".." {
                     continue;
@@ -57,6 +57,9 @@ pub fn fetch_entries(paths: &[String], show_all: bool) -> Result<Vec<LsRecord>> 
 
                 if let Ok(file_type) = entry.file_type() {
                     let ls_file_type = if file_type.is_symlink() {
+                        if let Ok(target) = std::fs::read_link(entry.path()) {
+                            name = format!("{} -> {}", name, target.to_string_lossy());
+                        }
                         LsRecordType::SYMBOLINK
                     } else if file_type.is_dir() {
                         LsRecordType::DIRECTORY
@@ -86,13 +89,16 @@ pub fn fetch_entries(paths: &[String], show_all: bool) -> Result<Vec<LsRecord>> 
                 }
             }
         } else {
-            let name = path
+            let mut name = path
                 .file_name()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
                 
             let ls_file_type = if metadata.is_symlink() {
+                if let Ok(target) = std::fs::read_link(path) {
+                    name = format!("{} -> {}", name, target.to_string_lossy());
+                }
                 LsRecordType::SYMBOLINK
             } else {
                 LsRecordType::FILE
