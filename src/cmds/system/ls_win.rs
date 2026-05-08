@@ -306,5 +306,146 @@ mod tests {
         assert!(summary.contains(".rs"));
         assert!(summary.contains(".toml"));
     }
+        #[test]
+    fn test_estimate_raw_dir_output() {
+        let records = vec![
+            LsRecord {
+                name: "file.txt".to_string(),
+                file_type: LsRecordType::FILE,
+                size: 100,
+                timestamp: Some(1000),
+                extension: "txt".to_string(),
+            },
+            LsRecord {
+                name: "dir".to_string(),
+                file_type: LsRecordType::DIRECTORY,
+                size: 0,
+                timestamp: Some(2000),
+                extension: "".to_string(),
+            },
+        ];
+        let estimate = estimate_raw_dir_output(&records);
+        // Calculation: 
+        // Base = 8 ("total 0\n")
+        // file.txt length (8) + 45 = 53
+        // dir length (3) + 45 = 48
+        // 8 + 53 + 48 = 109 spaces
+        assert_eq!(estimate.len(), 109);
+        assert_eq!(estimate, " ".repeat(109));
+    }
+
+    #[test]
+    fn test_fetch_entries_single_file() {
+        let dir = tempdir().unwrap();
+        let dir_path = dir.path();
+
+        let file_path = dir_path.join("single.txt");
+        File::create(&file_path).unwrap();
+
+        // Testing the `} else {` branch of fetch_entries
+        let records = fetch_entries(&[file_path.to_string_lossy().into_owned()], false).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].name, "single.txt");
+        assert_eq!(records[0].file_type, LsRecordType::FILE);
+    }
+
+    #[test]
+    fn test_run_native_sorting() {
+        let dir = tempdir().unwrap();
+        let dir_path = dir.path();
+
+        // Create files in specific order but with non-alphabetical names.
+        // We add slight sleeps to guarantee different OS file modification times.
+        File::create(dir_path.join("c.txt")).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1050));
+        
+        File::create(dir_path.join("a.txt")).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1050));
+        
+        File::create(dir_path.join("b.txt")).unwrap();
+
+        let path_str = dir_path.to_string_lossy().into_owned();
+
+        // 1. Default (alphabetical: a.txt -> b.txt -> c.txt)
+        let (_, output_default, _) = run_native(vec![path_str.clone()], false, vec![]).unwrap();
+        let pos_a = output_default.find("a.txt").unwrap();
+        let pos_b = output_default.find("b.txt").unwrap();
+        let pos_c = output_default.find("c.txt").unwrap();
+        assert!(pos_a < pos_b && pos_b < pos_c, "Default sort should be alphabetical");
+
+        // 2. Reverse alphabetical (-r: c.txt -> b.txt -> a.txt)
+        let (_, output_rev, _) = run_native(vec![path_str.clone()], false, vec!["-r".to_string()]).unwrap();
+        let pos_a_r = output_rev.find("a.txt").unwrap();
+        let pos_b_r = output_rev.find("b.txt").unwrap();
+        let pos_c_r = output_rev.find("c.txt").unwrap();
+        assert!(pos_c_r < pos_b_r && pos_b_r < pos_a_r, "Reverse sort (-r) should be reverse alphabetical");
+
+        // 3. Time sort (-t: newest first -> b.txt -> a.txt -> c.txt)
+        let (_, output_time, _) = run_native(vec![path_str.clone()], false, vec!["-t".to_string()]).unwrap();
+        let pos_a_t = output_time.find("a.txt").unwrap();
+        let pos_b_t = output_time.find("b.txt").unwrap();
+        let pos_c_t = output_time.find("c.txt").unwrap();
+        assert!(pos_b_t < pos_a_t && pos_a_t < pos_c_t, "Time sort (-t) should be newest first");
+
+        // 4. Reverse time sort (-rt: oldest first -> c.txt -> a.txt -> b.txt)
+        let (_, output_rev_time, _) = run_native(vec![path_str.clone()], false, vec!["-rt".to_string()]).unwrap();
+        let pos_a_rt = output_rev_time.find("a.txt").unwrap();
+        let pos_b_rt = output_rev_time.find("b.txt").unwrap();
+        let pos_c_rt = output_rev_time.find("c.txt").unwrap();
+        assert!(pos_c_rt < pos_a_rt && pos_a_rt < pos_b_rt, "Reverse time sort (-rt) should be oldest first");
+    }
+
+    #[test]
+    fn test_run_native_total_combo() {
+        let dir = tempdir().unwrap();
+        let dir_path = dir.path();
+
+        // Create Directory
+        fs::create_dir(dir_path.join("folder_b")).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Create File
+        let file_path = dir_path.join("file_a.txt");
+        File::create(&file_path).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Create Symlink
+        let link_path = dir_path.join("symlink_c");
+        #[cfg(windows)]
+        let symlink_result = std::os::windows::fs::symlink_file(&file_path, &link_path);
+        #[cfg(not(windows))]
+        let symlink_result = std::os::unix::fs::symlink(&file_path, &link_path);
+
+        if let Err(e) = symlink_result {
+            eprintln!("Skipping symlink creation in combo test due to privileges: {:?}", e);
+        }
+
+        let path_str = dir_path.to_string_lossy().into_owned();
+
+        // Run holistic function with -rt flags and show_all = true
+        let (exit_code, output, estimate) = run_native(
+            vec![path_str], 
+            true, 
+            vec!["-rt".to_string()]
+        ).unwrap();
+
+        assert_eq!(exit_code, 0);
+        assert!(!estimate.is_empty(), "Token estimate string should be generated");
+        
+        // Assert output contains all elements
+        assert!(output.contains("folder_b/"));
+        assert!(output.contains("file_a.txt"));
+        
+        if dir_path.join("symlink_c").exists() {
+            assert!(output.contains("symlink_c"));
+        }
+        
+        // Because synthesize_output explicitly formats into sections (Dirs -> Symlinks -> Files)
+        // the sorting flags only apply to the items *within* those sections. 
+        // We assert the summary appears at the bottom.
+        assert!(output.contains("Summary: "));
+    }
+
+
 }
 
