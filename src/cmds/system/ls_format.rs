@@ -1,20 +1,6 @@
 use std::collections::HashMap;
 
-/// Represents a single directory entry for token-optimized listing.
-#[derive(PartialEq, Eq, Debug, Clone, Copy)]
-pub enum LsRecordType{
-    FILE,
-    DIRECTORY,
-    SYMBOLINK,
-    UNKNOWN,
-}
-pub struct LsRecord {
-    pub name: String,
-    pub file_type: LsRecordType,
-    pub size: u64,
-    pub extension: String,
-    pub timestamp: Option<u64>,
-}
+use super::ls::{LsRecord, LsRecordType};
 
 /// Format bytes into human-readable size
 pub fn human_size(bytes: u64) -> String {
@@ -28,6 +14,7 @@ pub fn human_size(bytes: u64) -> String {
 }
 
 /// Synthesizes the compact, token-optimized string from a list of records.
+#[allow(unused_mut)]
 pub fn synthesize_output(mut records: Vec<LsRecord>) -> (String, String) {
     if records.is_empty() {
         return ("(empty)\n".to_string(), String::new());
@@ -98,4 +85,19 @@ pub fn synthesize_output(mut records: Vec<LsRecord>) -> (String, String) {
     summary.push('\n');
 
     (entries, summary)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_human_size() {
+        assert_eq!(human_size(0), "0B");
+        assert_eq!(human_size(500), "500B");
+        assert_eq!(human_size(1024), "1.0K");
+        assert_eq!(human_size(1234), "1.2K");
+        assert_eq!(human_size(1_048_576), "1.0M");
+        assert_eq!(human_size(2_500_000), "2.4M");
+    }
 }
