@@ -27,8 +27,8 @@ fn grep_error_exit_code_no_false_negative() {
         .expect("chmod fake rg");
 
     // Reference the rtk binary built by cargo for integration tests
-    let rtk = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(if cfg!(debug_assertions) {
+    let rtk =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(if cfg!(debug_assertions) {
             "target/debug/rtk"
         } else {
             "target/release/rtk"
