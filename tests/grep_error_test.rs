@@ -2,6 +2,10 @@
 //!
 //! grep/rg convention: exit 1 = no match (normal), exit >= 2 = real error.
 //! rtk must surface the error instead of printing a false-negative "0 matches".
+//!
+//! Unix-only: simulates a broken `rg` via a chmod'd shell script. The whole
+//! file is gated so the integration-test crate still compiles on Windows CI.
+#![cfg(unix)]
 
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
