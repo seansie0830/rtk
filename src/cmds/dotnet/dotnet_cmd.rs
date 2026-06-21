@@ -1090,9 +1090,12 @@ fn format_build_output(summary: &binlog::BuildSummary, _binlog_path: &Path) -> S
 /// inflation in issue #2501.
 ///
 /// Keep the raw fallback only when the structured section can't stand on its own:
-/// no failures were parsed, or some parsed failure has no detail (filter blind).
+/// no failures were parsed, the parsed list is shorter than `summary.failed`
+/// (some failures never made it into the section), or some parsed failure has no
+/// detail (filter blind).
 fn test_needs_raw_fallback(summary: &binlog::TestSummary) -> bool {
     summary.failed_tests.is_empty()
+        || summary.failed_tests.len() < summary.failed
         || summary.failed_tests.iter().any(|t| t.details.is_empty())
 }
 
@@ -1461,19 +1464,54 @@ mod tests {
 
     #[test]
     fn test_needs_raw_fallback_false_when_failures_have_detail() {
+        // Every reported failure was parsed and carries detail: the structured
+        // section stands alone, so the raw prepend is dropped (issue #2501).
+        let failed_tests: Vec<binlog::FailedTest> = (0..5)
+            .map(|i| binlog::FailedTest {
+                name: format!("MyTests.Case{i}"),
+                details: vec!["Assert.True() Failure".to_string()],
+            })
+            .collect();
         let summary = binlog::TestSummary {
             passed: 717,
             failed: 5,
             skipped: 0,
             total: 722,
             project_count: 1,
-            failed_tests: vec![binlog::FailedTest {
-                name: "MyTests.HasRestriction".to_string(),
-                details: vec!["Assert.True() Failure".to_string()],
-            }],
+            failed_tests,
             duration_text: Some("2 s".to_string()),
         };
         assert!(!test_needs_raw_fallback(&summary));
+    }
+
+    #[test]
+    fn test_needs_raw_fallback_true_when_parsed_list_incomplete() {
+        // summary.failed reports 5, but only 3 blocks were parsed (each with
+        // detail). The 2 missing failures live only in raw stdout — keep the
+        // fallback so they aren't silently dropped.
+        let summary = binlog::TestSummary {
+            passed: 717,
+            failed: 5,
+            skipped: 0,
+            total: 722,
+            project_count: 1,
+            failed_tests: vec![
+                binlog::FailedTest {
+                    name: "MyTests.One".to_string(),
+                    details: vec!["Assert.True() Failure".to_string()],
+                },
+                binlog::FailedTest {
+                    name: "MyTests.Two".to_string(),
+                    details: vec!["Assert.Equal() Failure".to_string()],
+                },
+                binlog::FailedTest {
+                    name: "MyTests.Three".to_string(),
+                    details: vec!["Assert.Null() Failure".to_string()],
+                },
+            ],
+            duration_text: Some("2 s".to_string()),
+        };
+        assert!(test_needs_raw_fallback(&summary));
     }
 
     #[test]
