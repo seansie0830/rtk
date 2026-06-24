@@ -66,17 +66,20 @@ pub fn run(
 
     filtered = apply_line_window(&filtered, max_lines, tail_lines, &lang);
 
-    let rtk_output = if line_numbers {
-        format_with_line_numbers(&filtered)
+    let (raw, rtk_output) = if line_numbers {
+        (
+            format_with_line_numbers(&content),
+            format_with_line_numbers(&filtered),
+        )
     } else {
-        filtered.clone()
+        (content.clone(), filtered.clone())
     };
-    let shown = never_worse(&content, &rtk_output);
+    let shown = never_worse(&raw, &rtk_output);
     print!("{}", shown);
     timer.track(
         &format!("cat {}", file.display()),
         "rtk read",
-        &content,
+        &raw,
         shown,
     );
     Ok(())
@@ -131,15 +134,18 @@ pub fn run_stdin(
 
     filtered = apply_line_window(&filtered, max_lines, tail_lines, &lang);
 
-    let rtk_output = if line_numbers {
-        format_with_line_numbers(&filtered)
+    let (raw, rtk_output) = if line_numbers {
+        (
+            format_with_line_numbers(&content),
+            format_with_line_numbers(&filtered),
+        )
     } else {
-        filtered.clone()
+        (content.clone(), filtered.clone())
     };
-    let shown = never_worse(&content, &rtk_output);
+    let shown = never_worse(&raw, &rtk_output);
     print!("{}", shown);
 
-    timer.track("cat - (stdin)", "rtk read -", &content, shown);
+    timer.track("cat - (stdin)", "rtk read -", &raw, shown);
     Ok(())
 }
 
