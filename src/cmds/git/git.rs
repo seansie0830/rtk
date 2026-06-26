@@ -862,12 +862,6 @@ fn run_status(args: &[String], verbose: u8, global_args: &[String]) -> Result<i3
     let mut cmd = build_status_command(args, global_args);
     let result = exec_capture(&mut cmd).context("Failed to run git status")?;
 
-    // Any git status failure must propagate, not be flattened into a clean
-    // working tree + exit 0 (#2497). The non-compact path above already guards
-    // on success; the compact path previously only caught "not a git repository"
-    // and let every other failure (corrupt index, lock contention, …) fall
-    // through to a success-looking summary. Keep the friendly message for the
-    // common not-a-repo case; surface raw stderr otherwise.
     if !result.success() {
         let message = if result.stderr.contains("not a git repository") {
             "Not a git repository".to_string()
