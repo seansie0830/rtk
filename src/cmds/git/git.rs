@@ -2078,6 +2078,22 @@ mod tests {
     }
 
     #[test]
+    fn test_run_stash_list_propagates_failure() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let global = vec!["-C".to_string(), dir.path().to_string_lossy().into_owned()];
+        let code = run_stash(Some("list"), &[], 0, &global).expect("run_stash list");
+        assert_ne!(code, 0, "git stash list failure must propagate");
+    }
+
+    #[test]
+    fn test_run_stash_show_propagates_failure() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let global = vec!["-C".to_string(), dir.path().to_string_lossy().into_owned()];
+        let code = run_stash(Some("show"), &[], 0, &global).expect("run_stash show");
+        assert_ne!(code, 0, "git stash show failure must propagate");
+    }
+
+    #[test]
     fn test_filter_worktree_list() {
         let output =
             "/home/user/project  abc1234 [main]\n/home/user/worktrees/feat  def5678 [feature]\n";
