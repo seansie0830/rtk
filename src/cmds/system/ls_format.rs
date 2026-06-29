@@ -14,6 +14,7 @@ pub fn human_size(bytes: u64) -> String {
 }
 
 /// Synthesizes the compact, token-optimized string from a list of records.
+// todo : I would add the flags in the synthesize output procedure.
 #[allow(unused_mut)]
 pub fn synthesize_output(mut records: Vec<LsRecord>) -> (String, String) {
     if records.is_empty() {
